@@ -1,0 +1,1313 @@
+---
+author: "Amber Camilleri"
+title: "STA 380, Part 2: Exercises"
+date: "August 19, 2019"
+output:
+  pdf_document:
+    toc: true
+    fig_width: 6
+    fig_height: 4
+  md_document:
+    toc: true
+    fig_width: 6
+    fig_height: 4
+  github_document:
+    toc: true
+    fig_width: 6
+    fig_height: 4
+---
+
+
+```{r wrap-hook, include=FALSE}
+library(knitr)
+hook_output = knit_hooks$get('output')
+knit_hooks$set(output = function(x, options) {
+  # this hook is used only when the linewidth option is not NULL
+  if (!is.null(n <- options$linewidth)) {
+    x = knitr:::split_lines(x)
+    # any lines wider than n should be wrapped
+    if (any(nchar(x) > n)) x = strwrap(x, width = n)
+    x = paste(x, collapse = '\n')
+  }
+  hook_output(x, options)
+})
+```
+
+<P style="page-break-before: always">
+\newpage  
+1. Visual Story Telling Part 1: Green Buildings
+===============================================    
+```{r setup, include = FALSE}
+library(dplyr)
+library(ggplot2)
+library(kknn)
+library(quantmod)
+library(mosaic)
+library(foreach)
+library(pander)
+library(proxy)
+library(RColorBrewer)
+library(gridExtra)
+library(ggpubr)
+library(nycflights13)
+library(maps)
+library(ggthemes)
+library(arules)
+library(tm)
+library(tm) 
+library(magrittr)
+library(randomForest)
+library(caret)
+library(e1071)
+
+buildings = read.csv('https://raw.githubusercontent.com/jgscott/STA380/master/data/greenbuildings.csv')
+green_buildings = subset(buildings, green_rating==1)
+non_green_buildings = subset(buildings, green_rating!=1)
+attach(buildings)
+
+#Import ABIA data
+#flight=read.csv("https://raw.githubusercontent.com/jgscott/STA380/master/data/ABIA.csv")
+#attach(flight)
+```
+
+The following analysis will outline the evidence in support of/ opposition to the conclusions of the on-staff stats guru.  
+
+(a) Is it reasonable to remove low occupied outliers? 
+-----------------------------------------------------  
+> *"I noticed that a handful of the buildings in the data set had very low occupancy rates (less than 10% of available space occupied). I decided to remove these buildings from consideration, on the theory that these buildings might have something weird going on with them, and could potentially distort the analysis."*  
+
+I looked into the distribution of leasing rate of green buildings and non-green buildings. Interestingly, the distribution of non-green buildings' leasing rate has a shoot up in the range below 10%. Therefore, I hold the same belief that these buildings are "weird" and should be removed from our analysis.  
+
+
+```{r, echo=FALSE}
+#plot subset (non_green_buildings))
+hist(non_green_buildings$leasing_rate, 
+     col=c('red', rep('grey',9)),
+     main = "Histogram for Occupancy", 
+     xlab = "Leasing Rate")
+
+#plot subset (green_buildings)
+hist(green_buildings$leasing_rate, col="lightgreen", add=TRUE)
+
+legend("topleft",
+       legend=c('Non-Green buildings','Green buildings'),
+       pch=c(15,15),
+       col=c('grey','lightgreen'))
+```
+
+```{r, include= FALSE}
+par(mfrow=c(1,2))
+
+hist(green_buildings$leasing_rate, 
+     col="lightgreen", 
+     main="Green Buildings", 
+     xlab="Leasing Rate")
+
+hist(non_green_buildings$leasing_rate, 
+     main="Non-Green Buildings", 
+     xlab="Leasing Rate", 
+     col=c('red', rep('grey',9)))
+```
+
+```{r rent vs. occupancy (no outliers), include=FALSE}
+# Since I agree with the guru, I will remove any outliers with < 10% occupancy
+mask = which(buildings$leasing_rate > 10)
+buildings = buildings[mask,]
+green_buildings = subset(buildings, green_rating==1)
+non_green_buildings = subset(buildings, green_rating!=1)
+
+# Find values given the median rent for green/non-green buildings
+green_median = green_buildings[green_buildings$Rent == median(green_buildings$Rent),]
+nongreen_median = non_green_buildings[non_green_buildings$Rent == median(non_green_buildings$Rent),]
+
+# Plot Occupancy Rate vs. Rent
+plot(non_green_buildings$leasing_rate, non_green_buildings$Rent, 
+     col="grey", pch=21, cex=0.5,
+     main="Occupancy Rate (>= 10%) vs. Rent",
+     xlab = "Leasing Rate", 
+     ylab="Annual Rent  ($ / sqft)")
+
+points(green_buildings$leasing_rate, green_buildings$Rent, col="lightgreen", pch=21, cex=0.5)
+
+abline(v=median(nongreen_median$leasing_rate),col='grey',lwd=2)
+abline(v=median(green_median$leasing_rate),col='lightgreen',lwd=2)
+
+legend(x=9,y=250,cex=0.7,
+        legend=c('Non-Green buildings','Median Occupancy Non-Green Buildings','Green buildings','Median Occupancy Green Buildings'),
+       lty=c(NA,1,NA,1),pch=c(21,NA,21,NA),
+       col=c('grey','grey','lightgreen','lightgreen'))
+```
+``` {r, echo=FALSE, linewidth=90}
+mask2 = which(buildings$Rent > 75)
+outliers = buildings[mask2,]
+remain = buildings[-mask2,]
+
+paste("The number of outliers is",length(mask2))
+
+paste("The mean rent of outliers is ",mean(outliers$Rent),
+      ", while the mean rent of all buildings is ",mean(buildings$Rent))
+
+paste("The mean # of stories of outliers is ",mean(outliers$stories),
+      ", while the mean # of stories of all buildings is ",mean(buildings$stories))
+
+paste("The number of green buildings among outliers is ",sum(outliers$green_rating=="1"),
+      ", while the number of outliers is ",dim(outliers)[1],
+      ". The fraction of outliers that are green is ", sum(outliers$green_rating=="1")/dim(outliers)[1])
+```
+
+
+Most of these outliers have significantly higher rent than the average level. And then most of them have specifically high stories level which might be the reason of extremely high rent. Considering I am estimating for a 15-story building. These outliers might be less valuable for analysis. In addition, among these outliers, there exist few green buildings, which means I am not able to compare green and non-green building among these outleirs. In conclusion, I agree with the guru's decision to remove these outliers.  
+
+
+
+
+(b) Should We use Median or Mean?  
+----------------------------------  
+> *"I used the median rather than the mean, because there were still some outliers in the data, and the median is a lot more robust to outliers."*  
+
+I decided to use median based on the distribution and size of the dataset. The leasing rate for green buildings is highly left-skewed, so the median is a better estitamation for our building, which is 92.9%.  
+``` {r, echo=FALSE}
+d <- density(buildings$Rent)
+plot(d, main="Rent Density (All Buildings)", xlab=("Annual Rent  ($ / sqft)"))
+# polygon(d, col="lightgrey")
+
+abline(v=median(buildings$Rent),col='firebrick',lwd=2)
+abline(v=mean(buildings$Rent),col='cyan4',lwd=2)
+
+# abline(v=median(non_green_buildings$Rent),col='grey',lwd=2)
+# abline(v=median(green_buildings$Rent),col='lightgreen',lwd=2)
+
+legend("topright", cex=0.7,
+       legend=c('Median Rent','Mean Rent'),
+       lty=c(1,1), lwd=c(2,2),
+       col=c('firebrick','cyan4'))
+```
+  
+We can also see that the density plot is right-skewed. Therefore, it might be better to use median to measure the central tendency of the dataset. 
+
+```{r density green vs. non-green, include=FALSE}
+par(mfrow=c(1,2))
+
+# Rent Density (Green Buildings)
+d2 <- density(green_buildings$Rent)
+plot(d2, main="Rent Density (Green Buildings)", xlab=("Rent  ($ / sqft)"))
+polygon(d2, col="lightgreen")
+
+abline(v=median(green_buildings$Rent),col='firebrick',lwd=2)
+
+legend("topright", cex=0.7,
+       legend='Median Rent',
+       lty=1, lwd=2,
+       col='firebrick')
+
+# Rent Density Non-Green Buildings
+d1 <- density(non_green_buildings$Rent)
+plot(d1, main="(Non-Green Buildings)", xlab=("Rent  ($ / sqft)"))
+polygon(d1, col="grey")
+
+abline(v=median(non_green_buildings$Rent),col='firebrick',lwd=2)
+
+legend("topright", cex=0.7,
+       legend='Median Rent',
+       lty=1, lwd=2,
+       col='firebrick')
+```
+
+
+
+```{r,echo=FALSE}
+d2 <- density(green_buildings$Rent)
+d1 <- density(non_green_buildings$Rent)
+
+plot(d2,
+     col="lightgreen",
+     main="Rent Density", 
+     xlab=("Annual Rent  ($ / sqft)")) 
+
+polygon(d1, col="grey")
+polygon(d2, col=rgb(0,1,0,0.3))
+
+abline(v=median(green_buildings$Rent),col='firebrick',lwd=2)
+abline(v=median(non_green_buildings$Rent),col="black",lwd=2)
+
+legend("topright", cex=0.7,
+       legend=c('Non-Green Median Rent','Green Median Rent'),
+       lty=c(1,1), lwd=c(2,2),
+       col=c("black",'firebrick'))
+```
+
+
+``` {r, echo=FALSE, linewidth=90}
+paste("The median market rent in the non-green buildings is $",median(non_green_buildings$Rent),
+      " per square foot per year, while the median market rent in the green buildings is $",median(green_buildings$Rent),
+      " per square foot per year: about $", (median(green_buildings$Rent) - median(non_green_buildings$Rent)),
+      " more per square foot.")
+
+
+paste("Because our building would be 250,000 square feet, this would translate into an additional $", 250000 * 2.57, "of extra revenue per year if I build the green building")
+```
+
+
+
+
+(c) Confounding Variables  
+--------------------------  
+> *"Once I scrubbed these low-occupancy buildings from the data set, I looked at the green buildings and non-green buildings separately. The median market rent in the non-green buildings was $25 per square foot per year, while the median market rent in the green buildings was $27.60 per square foot per year: about $2.60 more per square foot."*  
+
+The way the author calculates the premium rent for green buildings is too generic as there are confounding variables. With these confounding variables, we are not sure how the green rating directly influences the rent.  
+  
+Age is one of the confounding variables. As shown in the plot, green buildings are highly concentrated in the lower range of age, which means they are relatively new, thus having higher rent. I decided to analyze the buildings with ages less than 50.   
+```{r confounding_age, echo=FALSE}
+green_median = green_buildings[green_buildings$Rent == median(green_buildings$Rent),]
+nongreen_median = non_green_buildings[non_green_buildings$Rent == median(non_green_buildings$Rent),]
+
+plot(non_green_buildings$age, non_green_buildings$Rent, 
+     col="grey", pch=21, cex=0.5,
+     main="Age vs. Rent",
+     xlab = "Buildings Age", 
+     ylab="Annual Rent  ($/ sqft)")
+
+abline(v=median(nongreen_median$age),col='grey',lwd=2)
+abline(v=median(green_median$age),col='lightgreen',lwd=2)
+points(green_buildings$age, green_buildings$Rent, col="lightgreen", pch=21, cex=0.5)
+
+legend("topright", cex=0.7,
+       legend=c('Non-Green buildings','Median Age Non-Green Buildings','Green buildings','Median Age Green Buildings'),
+       lty=c(NA,1,NA,1),pch=c(21,NA,21,NA),
+       col=c('grey','grey','lightgreen','lightgreen'))
+```
+
+Another confounding variable is class. As shown in charts below, class A buildings have a definite premium rent over other classes and green buildings have an enormously high percentage falling into class A and class B. Therefore, I removed buildings in class C in our analysis.  
+```{r confounding_class, echo=FALSE}
+buildings$class = ifelse(buildings$class_a==1, 1, ifelse(buildings$class_b==1, 2, 3))
+
+# Boxlot of Rent vs. Class
+boxplot(buildings$Rent~buildings$class,
+        outline=FALSE,
+        boxwex=0.5, 
+        col=c('pink','lightblue','lightyellow'), 
+        names = c("Class A", "Class B", "Class C"), 
+        main="Rent vs. Class",
+        xlab = "Class Rating", ylab="Annual Rent  ($/ sqft)")
+
+# Pie chart of Class Rating for Green/Non-Green Buildings
+par(mfrow=c(1,2))
+pie_chart = table(buildings$green_rating, buildings$class)
+pie(pie_chart[2,], 
+    labels = c('Class A: 80%', 'Class B: 19%', 'Class C: 1%'), 
+    col=c('pink','lightblue','lightyellow'), 
+    main="Green Buildings", init.angle = 150)
+pie(pie_chart[1,], 
+    labels = c('Class A: 36%', 'Class B: 48%', 'Class C: 16%'), 
+    col=c('pink','lightblue','lightyellow'), 
+    main="Non-green Buildings", init.angle  = 90)
+```
+
+
+```{r confounding, echo=FALSE}
+green_buildings_con = subset(green_buildings, age<=50 & (class_a==1 | class_b==1))
+non_green_buildings_con = subset(non_green_buildings, age<=50 & (class_a==1 | class_b==1))
+```
+
+Then I calculate how much the premium in rent is brought by green rating. I first group the buildings based on cluster, and then calculate the difference between the median of green building's rent and that of non-green buildings within the same cluster.  
+```{r premium_rent, echo=FALSE, linewidth=90}
+non_green_clusters<- non_green_buildings_con%>%
+  group_by(cluster)%>%
+  summarise(rent_mean = mean(Rent),
+            rent_median = median(Rent))
+green_clusters<- green_buildings_con%>%
+  group_by(cluster)%>%
+  summarise(rent_mean_g = mean(Rent),
+            rent_median_g = median(Rent))
+rent_clusters = merge(x=non_green_clusters, y=green_clusters, by="cluster", all.y = TRUE)
+rent_clusters$median_premium = rent_clusters$rent_median_g - rent_clusters$rent_median
+#mean(rent_clusters$median_premium, na.rm = TRUE)
+
+paste("The mean of difference among all clusters is ",mean(rent_clusters$median_premium, na.rm = TRUE), " which is our expected premium rent.")
+```
+
+
+
+(d) Future Predictions  
+----------------------  
+> *"Based on the extra revenue we would make, we would recuperate these costs in $5000000/650000 = 7.7 years. Even if our occupancy rate were only 90%, we would still recuperate the costs in a little over 8 years."*   
+
+It is such a strong assumption that it assumes a constant leasing rate and constant rent over the life cycle of the building. Is that true? I create a new factor, <i>LR</i>, which is <i>leasing_rate $\times$ Rent</i>. With a fixed building size, this feature is proportional to the total leasing revenue. How does it change with age? I selected buildings less than 50 years old and in class A or B and here is the plot:  
+```{r over_age, echo=FALSE}
+buildings_con = subset(buildings, age<=50&(class_a==1 | class_b==1))
+buildings_con$LR = buildings_con$leasing_rate * buildings_con$Rent
+model = train.kknn(LR ~ age, data = buildings_con, ks= 20)
+newdata = as.data.frame(seq(1, 50))
+colnames(newdata) = c("age")
+predictions = predict(model, newdata)
+plot(buildings_con$age, buildings_con$LR,pch=21, cex=0.5,ylab= "LR", xlab="Age", col="snow4", main = "Total revenue")
+lines(newdata$age, predictions, type="l", col='red', lwd=2)
+legend("topright", cex=0.7, c("KNN Regression"), lwd=2.5,col="red")
+```
+
+Each building is a gray dot in the plot. I draw a line with KNN (k set to 20) to show a smooth general trend of LR over age. It turns out that the total revenue doesn't go down with an increasing age. Therefore, I could assume that the 2.2 premium for green rating holds for at least the first 50 years.  
+    
+Besides revenue, the cost for green buildings could potentially be higher than non-green ones. Without enough information to quantify that, I assume that the extra cost is about 5% of total revenue. The median of green buildings' rent is $30, which makes the cost $1.5.   
+   
+Therefore, the annual extra revenue from green rating is ($2.2-$1.5) $\times$ 92.9% $\times$ 250,000 (size) = $162,757 and it needs $5,000,000 /  $162,757 = 30 years to recuperate the extra cost. 30 years as the payback period of an investment is too long and makes the company exposed to industry fluctuations and external risks. I would suggest not building the green building.  
+  
+
+
+<P style="page-break-before: always">
+\newpage  
+2. Visual Story Telling Part 2: Flights at ABIA  
+===============================================  
+```{r, include=FALSE}
+#Import ABIA data
+flight = read.csv("https://raw.githubusercontent.com/jgscott/STA380/master/data/ABIA.csv")
+attach(flight)
+
+#Turn catigorical variables into factors 
+DayofMonth=as.factor(DayofMonth)
+DayOfWeek=as.factor(DayOfWeek)
+Dest=as.factor(Dest)
+Diverted=as.factor(Diverted)
+Cancelled=as.factor(Cancelled)
+CancellationCode=as.factor(CancellationCode)
+Month=as.factor(Month)
+Origin=as.factor(Origin)
+UniqueCarrier=as.factor(UniqueCarrier)
+
+#Split delay time into delay(>0) and arrive in advance(<=0)
+flight$Adelay=ifelse(flight$ArrDelay>0,flight$ArrDelay, NA)
+flight$Aahead=ifelse(flight$ArrDelay<=0,-flight$ArrDelay,NA)
+flight$Ddelay=ifelse(flight$DepDelay>0,flight$DepDelay,NA)
+flight$Dahead=ifelse(flight$DepDelay<=0,-flight$DepDelay,NA)
+```
+
+(a) Delay Times 
+------------------  
+```{r Monthly Delay,echo=FALSE}
+ggplot(flight,aes(x = Month ,na.rm = TRUE, colour = DelayType)) +
+  geom_line(aes(y=Adelay,color='Arrival'),stat = "summary", fun.y = "mean",na.rm = TRUE)+
+  geom_line(aes(y=Ddelay,color='Departure'),stat = "summary", fun.y = "mean",na.rm = TRUE)+
+  scale_x_continuous(breaks=c(1,2,3,4,5,6,7,8,9,10,11,12))+
+  ylab('Delay Time (min)')+
+  ggtitle('Average Monthly Arrival/Departure Delay Time')+
+  theme_minimal()
+```
+  
+Apparently, months with a higher average arrival delay tend to have a higher average departure delay. This may be because that given flight time period stays the same, departure delays will always lead to arrival delays.  
+
+
+```{r types of delay, echo=FALSE}
+ggplot(flight, aes(x=Month, na.rm = TRUE, colour = Type)) + 
+  geom_line(aes(y = LateAircraftDelay, colour="Late Aircraft Delay"), stat = "summary", fun.y = "mean", na.rm = TRUE) + 
+  geom_line(aes(y = SecurityDelay, colour = "Security Delay"), stat = "summary", fun.y = "mean", na.rm = TRUE) +
+  geom_line(aes(y = NASDelay, colour = "NAS Delay"), stat = "summary", fun.y = "mean", na.rm = TRUE) +
+  geom_line(aes(y = WeatherDelay, colour = "Weather Delay"), stat = "summary", fun.y = "mean", na.rm = TRUE) +
+  geom_line(aes(y = CarrierDelay, colour = "Carrier Delay"), stat = "summary", fun.y = "mean", na.rm = TRUE) +
+  ylab(label="Delay Time (min)") + 
+  xlab("Month")+
+  theme_minimal() +
+  scale_x_continuous(breaks=c(1,2,3,4,5,6,7,8,9,10,11,12)) +
+  ggtitle('Average Delay Time Due to Five Types of Delay')
+```
+   
+According to this plot, I can see late aircraft delay is much higher than any other delay types except for September and October. Overall, The most delays occur in the winter months, probably because of incliment weather.    
+  
+  
+```{r Carrier Delay, echo=FALSE}
+#Average arrival delay and carrier delay for each Carrier  
+p5=ggplot(flight, aes(x=UniqueCarrier, y=Adelay, na.rm = TRUE))+
+  stat_summary(fun.y="mean", geom="bar",fill='lightblue', na.rm = TRUE)+
+  stat_summary(aes(label=round(..y..,2)), fun.y="mean", geom="text", size=3,vjust = -0.5,na.rm = TRUE)+
+  theme_minimal()+
+  ggtitle('Average arrival delay for each Carrier')+
+  xlab('Unique Carrier Code')+
+  ylab('Arrival Delay (min)')+
+  coord_cartesian(ylim=c(0,45))
+
+p6=ggplot(flight, aes(x=UniqueCarrier, y=CarrierDelay, na.rm = TRUE))+
+  stat_summary(fun.y="mean", geom="bar",fill='pink', na.rm = TRUE)+
+  stat_summary(aes(label=round(..y..,2)), fun.y="mean", geom="text", size=3,vjust = -0.5,na.rm = TRUE)+
+  theme_minimal()+
+  ggtitle('Average carrier delay for each Carrier')+
+  xlab('Unique Carrier Code')+
+  ylab('Arrival Delay (min)')+
+  coord_cartesian(ylim=c(0,45))
+
+ggarrange(p5,p6, ncol = 1, nrow = 2)
+```
+  
+From these plots I can see that the higher average arrival delay for each carrier may not be due to their own fault. Airline YV and EV have both higher average arrival delay and average carrier delay, so it may be unwise to choose from these two carriers.   
+
+AircraftDelay has the largest delay time among all types of reasons. STL also ranks the first among this group.   
+
+
+
+(b) Cancellation Rate  
+----------------------  
+```{r cancellation init, echo=FALSE}
+flight = read.csv("https://raw.githubusercontent.com/jgscott/STA380/master/data/ABIA.csv")
+# get the total flight to one 
+flight["count"] = 1
+# only look at flights leaving Austin
+aus = flight[flight$Origin == "AUS", c(1:30)]
+total_flight = aggregate(count ~ Dest, aus, sum)
+# merge the total number of flights for each dest
+aus = merge(aus,total_flight,by="Dest", all.x = TRUE)
+
+# look into the cancelled flight
+cancelled = aus[aus$Cancelled == 1, c(1:31)]
+total_cancelled_flight = aggregate(count.x ~ Dest, cancelled, sum)
+
+# create a column containing average percent of cancelled flight for each destination
+merged = merge(total_flight, total_cancelled_flight, by="Dest", all.x = TRUE)
+merged[is.na(merged)] <- 0
+merged["average"] = (merged["count.x"] / merged["count"])*100
+
+#delete airports with less than 10 flights
+merged_delete = merged[merged['count'] > 10, c(1:4)]
+
+# get the logitude and latitude of airports
+usairports <- filter(airports, lat < 48.5)
+usairports <- filter(usairports, lon > -130)
+
+# merge the location to the final dataset
+cancelled_location = merge(merged_delete, usairports, by.x="Dest", by.y = "faa", all.x = TRUE)
+```
+Therefore, based on the average cancellation rate and the average total delay time for different airports, We can determine that STL is the worst airport to fly in. But one concern is that STL has 95 flights from Austin in our dataset, which is actually not a big destination. If considering the total number of flights, then ORD is also a bad destination.  
+  
+**Plot of Cancellation Rate by Airport (size corresponds to cancllation rate):**  
+```{r cancellation map, echo=FALSE}
+# plot the rate of cancellation
+colourCount = length(unique(cancelled_location$Dest))
+getPalette = colorRampPalette(brewer.pal(8, "Set2"))
+
+states = map_data('state')
+ggplot(data = states) + 
+  geom_polygon(aes(x = long, 
+                   y = lat, 
+                   fill = region, 
+                   group = group), 
+               color = "white") + 
+  coord_fixed(1.3) + 
+  scale_fill_manual(values = getPalette(colourCount)) +
+  guides(fill=FALSE) + 
+  geom_point(aes(x = cancelled_location$lon, 
+                 y = cancelled_location$lat, 
+                 size=cancelled_location$average), 
+             data = cancelled_location, 
+             color='black') + 
+  geom_text(aes(x = cancelled_location$lon, 
+                y = cancelled_location$lat-0.7, 
+                label = cancelled_location$Dest, 
+                size=0.7), 
+            data = cancelled_location) + 
+  theme_minimal() + 
+  ggtitle('Average Cancellation Rate for Each Airport')
+```
+   
+Top 5 airports with the average cancellation rate: STL, ORD, SJC, DFW, MEM  
+
+
+
+<P style="page-break-before: always">
+\newpage  
+3. Portfolio Modeling  
+=====================  
+I will construct three different portfolios of exchange-traded funds, or ETFs, and use bootstrap resampling to analyze the short-term tail risk of these portfolios. 
+
+(a) Characterize the risk/return properties of the five asset classes  
+---------------------------------------------------------------------    
+**My assets:**  
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+mystocks <- c("SPY", "TLT", "LQD", "EEM", "VNQ")
+getSymbols(mystocks)
+SPYa <- adjustOHLC(SPY)
+TLTa <- adjustOHLC(TLT)
+LQDa <- adjustOHLC(LQD)
+EEMa <- adjustOHLC(EEM)
+VNQa <- adjustOHLC(VNQ)
+myreturns <- cbind(ClCl(SPY),ClCl(TLT),ClCl(LQD),ClCl(EEM),ClCl(VNQ))
+myreturns <- as.matrix(na.omit(myreturns))
+
+#Find the mean and standard deviation for each asset
+asset_return <- sort(apply(myreturns, 2,mean))
+asset_risk <- sort(apply(myreturns, 2, sd))
+asset_return_ns <- apply(myreturns, 2,mean)
+asset_risk_ns <- apply(myreturns, 2, sd)
+```
+
+**Expected Return of each asset:**  
+```{r,echo=FALSE}
+pander(asset_return)
+```
+
+Now, rank the five asset from lowest return to highest return based on sample mean.  
+
+**Standard deviation of return for each asset:**  
+```{r,echo=FALSE}
+pander(asset_risk)
+```
+
+Here, I rank them from lowest risk to highest risk based on sample standard deviations of the assets. Then we got a rough risk ranking of these ETFs: EEM> VNQ> SPY> TLT> LQD.  
+
+From the above tables, I can classify our assets into different categories. Any assets below the 3rd rank will be given a score low. Those above the third rank will be given a score high, and the middle rank will be given a score medium.  
+
+**SPY** - High return/ Medium risk  
+
+**TLT** - Medium return/ Low risk  
+
+**LQD** - Low return/ Low risk  
+
+**EEM** - Low return/ High risk  
+
+**VNQ** - High return/ High risk  
+  
+  
+      
+**Correlation between assets' returns:**    
+```{r,echo=FALSE}
+cor_returns <- cor(myreturns)  
+pander(cor_returns) 
+```
+
+I will decide our not only on asset's expected return and standard deviation but also on its correlation with other assets. On one hand, if an asset has high positive correlation with another asset, that means they will make a riskier combination. On the other hand, if an asset has negative correlation with another asset, they will make a safer combination.  
+
+```{r,echo=FALSE}
+plot(asset_return_ns, asset_risk_ns, pch = 19, cex = 3.5, col = rainbow(5), xlab = "Expected Return", ylab = "Risk(Standard Devation)",ylim = c(0,0.025), main = "Risk vs Return")
+text(asset_return_ns[1],asset_risk_ns[1]+0.002, "SPY")
+text(asset_return_ns[2],asset_risk_ns[2]+0.002, "TLT")
+text(asset_return_ns[3],asset_risk_ns[3]+0.002, "LQD")
+text(asset_return_ns[4],asset_risk_ns[4]+0.002, "EEM")
+text(asset_return_ns[5],asset_risk_ns[5]+0.002, "VNQ")
+```
+  
+  
+(b) Bootstrapping  
+------------------  
+```{r,echo=FALSE}
+#Create a function to simulate 20 trading day
+sim_stock <- function(myreturns, investment, endperiod, weights, num_sim){
+    sim_result <- foreach(i=1:num_sim, .combine='rbind') %do% {
+        totalwealth <- investment #reset totalwealth for every simulation
+        horizon <- endperiod
+        holdings <- weights * totalwealth
+        for (today in 1:horizon) {
+            return_today <- resample(myreturns, 1, orig.ids = FALSE)
+            holdings <- holdings + return_today * holdings
+            totalwealth <- sum(holdings)
+            holdings <- weights * totalwealth #end of day. redistribute the wealth
+        }
+        totalwealth
+    }
+}
+
+```
+
+**Setting values for our simulation:**  
+
+I have 100,000 to invest, and I will do our simulation for 20 days.  
+
+```{r,echo=FALSE}
+investment <- 100000
+endperiod <- 20
+```
+
+For each of the strategy, I will adjust the weight accordingly.  
+
+(b1) Even Split Strategy  
+------------------------  
+
+For this first porfolio strategy, I will assign equal weights to all five assets.  
+  
+**Weight of each stock for the even split strategy:**  
+```{r,echo=FALSE}
+set.seed(1)
+weights <- c(0.2,0.2,0.2,0.2,0.2)
+even_strategy <- sim_stock(myreturns, investment, endperiod, weights, 3000)
+names(weights) <- mystocks
+pander(weights)
+```
+  
+**Distribution of return values for even split strategy:**    
+```{r,echo=FALSE}
+profit_split <- even_strategy - investment
+var05_split <- qdata(profit_split, 0.05)[2]
+hist(profit_split, 60, xlab = "Return Values", main = "Distribution of Return Values (Even Split Strategy)")
+
+abline(v = var05_split, col = "firebrick", lwd = 3)
+abline(v = mean(profit_split), col = "cyan4", lwd = 3)
+legend("topright", cex=0.7, 
+       c("5% Value at Risk", "Expected Return"), 
+       lty=c(1, 1), 
+       col=c("firebrick","cyan4"),
+       lwd = 3,
+       bty = "n")
+```
+
+
+```{r,echo=FALSE}
+var_mean_split <- c(var05_split, mean(profit_split),sd(profit_split))
+names(var_mean_split) <- c("Value at Risk at 5%", "Expected Return", "Standard Deviation of Return")
+pander(var_mean_split)
+```
+
+This shows us that if investors invest for 20 traiding days for this portfolio, 5 percent of the time they will suffer a loss of 5956. However, on average, they will receive around 530.  
+
+**Quantile Values:**
+```{r,echo=FALSE}
+pander(quantile(profit_split))
+```
+
+The table suggests that the return value in for 20 trading days can range from a loss of 18364 to a gain of 24347.  
+  
+  
+    
+(b2) Safe Strategy  
+------------------  
+  
+For this strategy, I will look at our classification of the five assets and choose those with low risk properties. I will also include one medium risk asset. For the weight, I will use 1/standard deviation as the coefficients and normalize them to add up to 1. SPY, TLT, and LQD are the three chosen assets.  
+
+To find the safe portfolio, we can:  
+1.use the funds with smaller variances (also relatively lower returns) like LQD, TLT, and SPY  
+2.choose the funds that have low correlations between them, especially consider using TLT together with other funds (hedging)  
+
+Therefore, we try allocating 40% of asset in LQD, 30% of asset in TLT, 30% of asset in SPY  
+
+```{r,echo=FALSE}
+pander(cor_returns)
+```
+Among the asset that has low standard deviation, I chose SPY, TLT, and LQD in our safe strategy because SPY and TLT have -0.44 correlation coefficient, suggesting a negative correlation. LQD and SPY have almost 0 correlation coefficient. Finally, LQD and TLT have about 0.4 correlation coefficient. It might seems counterintuitive at first that I pick this asset. However, other combinations will include an asset that has high correlation with SPY. As a result, I select LQD, TLT, and SPY.  
+  
+**Weight of each stock for the safe strategy:**    
+```{r,echo=FALSE}
+set.seed(1)
+spy_coef <- 1/asset_risk[3]
+tlt_coef <- 1/asset_risk[2]
+lqd_coef <- 1/ asset_risk[1]
+total_coef <- spy_coef + tlt_coef + lqd_coef
+spy_coef <- spy_coef/total_coef
+tlt_coef <- tlt_coef/total_coef
+lqd_coef <- lqd_coef/total_coef
+weights <- c(spy_coef, tlt_coef,lqd_coef, 0, 0)
+safe_strategy <- sim_stock(myreturns, investment, endperiod, weights, 3000)
+names(weights) <- mystocks
+pander(weights)
+```
+  
+**Distribution of return values for safe strategy:**   
+```{r,echo=FALSE}
+profit_safe <- safe_strategy - investment
+var05_safe <- qdata(profit_safe, 0.05)[2]
+hist(profit_safe, 60, xlab = "Return Values", main = "Distribution of Return Values (Safe Strategy)")
+abline(v = var05_safe, col = "firebrick", lwd = 3)
+abline(v = mean(profit_safe), col = "cyan4", lwd = 3)
+legend("topright", cex=0.7, 
+       c("5% Value at Risk", "Expected Return"), 
+       lty=c(1, 1), 
+       col=c("firebrick","cyan4"), 
+       lwd = 3,
+       bty = "n")
+```
+
+```{r,echo=FALSE}
+var_mean_safe <- c(var05_safe, mean(profit_safe), sd(profit_safe))
+names(var_mean_safe) <- c("Value at Risk at 5%", "Expected Return", "Standard Deviation of Return")
+pander(var_mean_safe)
+```
+This shows us that if investors invest for 20 traiding days for this portfolio, 5 percent of the time they will suffer a loss of 3218. However, on average, they will receive around 261.  
+
+**Quantile Values:**
+```{r,echo=FALSE}
+pander(quantile(profit_safe))
+```
+The table suggests that the return value in for 20 trading days can range from a loss of 9046 to a gain of 8677.  
+  
+
+
+(b3) Aggressive Strategy  
+------------------------  
+As for discovering the aggressive portfolio, we have following strategies:  
+1.use the funds with the biggest variances (also the highest returns) like EEM, VNQ, and SPY  
+2.choose the funds that have high correlations between them, specifically we should exclude TLT  
+3.choose only very few funds so that the risk can not be shared  
+Thus here we allocate 80% of asset in EEM and 20% of asset in VNQ  
+```{r,echo=FALSE}
+pander(cor_returns)
+```
+
+For this strategy, I will not be as diversified as the safe strategy. Also, I will look mainly at assests which have high returns with moderate to high risks. Coefficients will be adjusted based on the expected return values.  
+
+I chose SPY and VNQ because they both have high returns and moderate to high risk. They also have a positive correlation of 0.753, meaning that they are risky but can yield high returns.   
+  
+**Weight of each stock for the aggressive strategy:**  
+```{r,echo=FALSE}
+set.seed(1)
+total_coef_a <- asset_return[4] + asset_return[5]
+spy_coef_a <- asset_return[4]/total_coef_a
+vnq_coef_a <- asset_return[5]/total_coef_a
+weights <- c(spy_coef_a, 0, 0, 0, vnq_coef_a)
+aggressive_strategy <- sim_stock(myreturns, investment, endperiod, weights, 3000)
+names(weights) <- mystocks
+pander(weights)
+```
+   
+
+**Distribution of return values for agressive strategy:**  
+```{r,echo=FALSE}
+profit_aggressive <- aggressive_strategy - investment
+var05_aggressive <- qdata(profit_aggressive, 0.05)[2]
+hist(profit_aggressive, 60, xlab = "Return Values", main = "Distribution of Return Values (Aggressive Strategy)")
+abline(v = var05_aggressive, col = "firebrick", lwd = 3)
+abline(v = mean(profit_aggressive), col = "cyan4", lwd = 3)
+legend("topright", cex=0.7, 
+       c("5% value at Risk", "Expected Return"), 
+       lty=c(1, 1), 
+       col=c("firebrick","cyan4"),
+       lwd=3,
+       bty = "n")
+```
+
+
+```{r,echo=FALSE}
+var_mean_aggressive <- c(var05_aggressive, mean(profit_aggressive), sd(profit_aggressive))
+names(var_mean_aggressive) <- c("Value at Risk at 5%", "Expected Return", "Standard Deviation of Return")
+pander(var_mean_aggressive)
+```
+This shows us that if investors invest for 20 traiding days for this portfolio, 5 percent of the time they will suffer a loss of 2962. However, on average, they will receive around 358.  
+
+**Quantile Values:**
+```{r,echo=FALSE}
+pander(quantile(profit_aggressive))
+```
+The table suggests that the return value in for 20 trading days can range from a loss of 10140 to a gain of 9571.  
+
+
+
+
+(d) Summary  
+-----------  
+```{r, echo=FALSE}
+final_table <- data.frame(rbind(var_mean_split, var_mean_safe, var_mean_aggressive))
+rownames(final_table) <- c("Split Strategy","Safe Strategy", "Aggressive Strategy")
+colnames(final_table) <- c("Value at Risk at 5%", "Expected Return", "Standard Deviation of Return")
+pander(final_table)
+```
+  
+
+<P style="page-break-before: always">
+\newpage    
+4. Market Segmentation  
+======================   
+  
+(a) Data Pre-Processing  
+-----------------------  
+I delete the following four categories: 'spam','adult','uncategorize', and 'chatter in order to make our market segmentation more meaningful, spam, adult, uncategorize, and chatter. Since adult and spam are categories that are supposed to be filtered and contain improper contents, and uncategorize and chatter have no special meanings. Therefore, I delete these four columns.   
+```{r, echo=FALSE}
+social_market = read.csv('https://raw.githubusercontent.com/jgscott/STA380/master/data/social_marketing.csv')
+attach(social_market)
+
+discard<-c('spam','adult','uncategorize','chatter')
+social_market<-social_market[,!names(social_market)%in%discard]
+```
+  
+Since certain high-frequency terms have little discriminating power like photo-sharing, I use TF-IDF to recalculate the weight of each term for every follower. TF stands for term-frequency, measuring how frequent a term occurs in a follower's tweets: the more frequent a term occurs, the more important it is to the follower; IDF stands for inverse-document-frequency, measuring how frequent the term occurs in the whole dataset: the more frequent a term occurs, the less important it is to every follower.   
+
+```{r TFIDF, echo=FALSE}
+#TFIDF
+TF<-social_market[,-1]/rowSums(social_market[,-1])
+tmp=sort(apply(TF,2,mean),decreasing=TRUE)
+EXI_NUM<-apply(social_market[,-1]>0,2,function(x){table(x)['TRUE']})
+IDF<-as.numeric(log(nrow(social_market)/EXI_NUM))
+TFIDF = data.frame(t(t(TF)*IDF))
+```
+
+I use 'cosine' as a measurement for the similarity. It calculates the cosine of the angle between two vectors It measures difference in orientation instead of magnitude. For example, I have 3 follower A,B,C with features like A={'travelling':10,'cooking':5}, B={'travelling':20,'cooking':10}, C={'travelling':10,'cooking':12}, I would consider A more similar with B than C even though A and C are 'closer'.  
+  
+(b)  Define Market Segment  
+--------------------------  
+I will define a "market segment" as a cluster of correlated interests.   
+  
+```{r hclust, echo=FALSE}
+#hclust
+d.cosine<-dist(TFIDF,method='cosine')
+hc.ratio.cosine<-hclust(d.cosine,method='ward.D2')
+```
+By looking at different outputs of different Ks, I chose k=3 as our final parameter since its output makes more sense to us.  
+  
+```{r cluster 3, echo=FALSE}
+#hclust
+#choose cluster 3
+out.cluster = cutree(hc.ratio.cosine,k=3)
+TFIDF['cluster'] = out.cluster
+tfidf<-c()
+names<-c()
+for(j in 1:3){
+    cate = sort(apply(TFIDF[TFIDF['cluster']==j,-ncol(TFIDF)],2,mean),decreasing=TRUE)[1:5]
+    name = names(cate)
+    tfidf<-c(tfidf,unname(cate))
+    names<-c(names,name)
+}
+cate.df = data.frame(names=names,tfidf_scores=tfidf,cluster=c(rep('A',length(tfidf)/3),rep('C',length(tfidf)/3),rep('B',length(tfidf)/3)))
+cate.df$names<-factor(cate.df$names, levels=unique(cate.df$names))
+
+colourCount = length(unique(cate.df$names))
+getPalette = colorRampPalette(brewer.pal(8, "Set2"))
+
+ggplot(cate.df,mapping=aes(x=cluster,y=tfidf_scores,fill=names))+geom_bar(stat='identity',position='dodge')+theme(panel.grid.minor=element_blank(),panel.grid.major=element_blank())+scale_fill_manual(values=getPalette(colourCount))+theme_minimal()+xlab("Cluster") + ylab("TF-IDF Score")+ ggtitle("Top 5 Names for Each Cluster")
+```
+  
+**Top 5 Names per Cluster:**      
+```{r, echo=FALSE}
+names_df<-data.frame('A'=cate.df$names[cate.df$cluster=='A'],'B'=cate.df$names[cate.df$cluster=='B'],'C'=cate.df$names[cate.df$cluster=='C'])
+pander(names_df)
+```
+From the topics of high TFIDF-socres in the clusters, I can infer that first cluster represents people who care a lot about health and fitness, mostly likely to be well-educated people and housewives; the second cluster represents college/high school students; the third cluster represents people who care about current events, most likely working people.  
+
+(c) Marketing Strategy for Each Group:  
+--------------------------------------  
+- *Cluster one:* I recommend the company could post some healthy cooking recipes which use company's products, and the company can cooperate with some famous chefs to promote their products.  
+  
+- *Cluster two:* The company should launch interesting social media campaigns to attract this market segment, such as campaigns combining simple gaming and promotions together.  
+  
+- *Cluster three:* The company can sponsor some social events or even make some political contributions to improce their social exposures on newspaper, TV and news website to target this group.    
+
+  
+  
+<P style="page-break-before: always">
+\newpage    
+5. Author Attribution   
+======================   
+  
+(a) Data Pre-Proccessing  
+------------------------  
+```{r,echo = FALSE}
+library(tm) 
+library(magrittr)
+library(randomForest)
+library(caret)
+library(e1071)
+
+# Setitng the working directory
+setwd("~/R/Predictive Modeling R Scripts/STA380_Part2_Scott_Exercises")
+
+# Function to read the files
+readerPlain = function(fname){
+  readPlain(elem=list(content=readLines(fname)), 
+            id=fname, language='en')
+} 
+
+# Get the filenames from the train data set
+filenames <- list.files("./ReutersC50/C50train", recursive=TRUE)
+myname = strsplit(filenames, "[/]")
+author_name = NULL
+dim(myname)
+```
+  
+```{r,echo = FALSE}
+for (i in 1:length(myname)) {
+  author_name = c(author_name,myname[[i]][1])
+}
+
+class_labels_train = author_name
+author_name_train = unique(author_name)
+# Get the files in an array
+file_list_train <- NULL
+for (name in author_name_train){
+  file_list_train <- c(file_list_train, Sys.glob(paste0('./ReutersC50/C50train/',name,'/*.txt')))
+}
+```
+   
+```{r,echo = FALSE}
+# Read all files
+all_docs_train = lapply(file_list_train, readerPlain)
+mynames_train = file_list_train %>%
+{ strsplit(., '/', fixed=TRUE) } %>%
+{ lapply(., tail, n=2) } %>%
+{ lapply(., paste0, collapse = '') } %>%
+  unlist
+# create a dataframe with doc_id as author-article and text as the text in that article
+text_vector_train <- NULL
+for(i in 1:length(mynames_train)){
+  text_vector_train <- c(text_vector_train, paste0(content(all_docs_train[[i]]), collapse = " "))
+}
+# dataframe with text and document_id
+text_df_train <- data.frame(doc_id = mynames_train,
+                            text = text_vector_train)
+## once you have documents in a vector, you 
+## create a text mining 'corpus' with: 
+train_raw <- VCorpus(DataframeSource(text_df_train))
+## Some pre-processing/tokenization steps.
+my_documents_train = train_raw
+my_documents_train = tm_map(my_documents_train, content_transformer(tolower))
+my_documents_train = tm_map(my_documents_train, content_transformer(removeNumbers))
+my_documents_train = tm_map(my_documents_train, content_transformer(removePunctuation))
+my_documents_train = tm_map(my_documents_train, content_transformer(stripWhitespace))
+# Removing stop words
+my_documents_train = tm_map(my_documents_train, content_transformer(removeWords), stopwords("en"))
+## create a doc-term-matrix
+DTM_train = DocumentTermMatrix(my_documents_train)
+# Remove sparse terms
+DTM_train = removeSparseTerms(DTM_train, 0.99)
+DTM_train # now 3325 terms (versus ~32570 terms before)
+# Now, let us repeat the above process of creating DTM for the test data
+filenames <- list.files("./ReutersC50/C50test", recursive=TRUE)
+myname = strsplit(filenames, "[/]")
+author_name = NULL
+for (i in 1:length(myname)) {
+  author_name = c(author_name,myname[[i]][1])
+}
+class_labels_test = author_name
+author_name = unique(author_name)
+file_list_test = NULL
+#class_labels_test = NULL
+for (each in author_name) {
+  file_list_test = c(file_list_test,Sys.glob(paste0('./ReutersC50/C50test/',each,'/*.txt')))
+}
+all_docs_test = lapply(file_list_test, readerPlain)
+mynames_test = file_list_test %>%
+{ strsplit(., '/', fixed=TRUE) } %>%
+{ lapply(., tail, n=2) } %>%
+{ lapply(., paste0, collapse = '') } %>%
+  unlist
+# create a dataframe with doc_id as author-article and text as the text in that article
+text_vector_test <- NULL
+for(i in 1:length(mynames_test)){
+  text_vector_test <- c(text_vector_test, paste0(content(all_docs_test[[i]]), collapse = " "))
+}
+# dataframe with text and document_id
+text_df_test <- data.frame(doc_id = mynames_test,
+                            text = text_vector_test)
+# convert the dataframe to a Corpus
+test_raw <- VCorpus(DataframeSource(text_df_test))
+## Some pre-processing/tokenization steps.
+## tm_map just maps some function to every document in the corpus
+my_documents_test = test_raw
+my_documents_test = tm_map(my_documents_test, content_transformer(tolower))
+my_documents_test = tm_map(my_documents_test, content_transformer(removeNumbers))
+my_documents_test = tm_map(my_documents_test, content_transformer(removePunctuation))
+my_documents_test = tm_map(my_documents_test, content_transformer(stripWhitespace))
+# Removing stop words
+my_documents_test = tm_map(my_documents_test, content_transformer(removeWords), stopwords("en"))
+## create a doc-term-matrix
+DTM_test = DocumentTermMatrix(my_documents_test)
+summary(Terms(DTM_test) %in% Terms(DTM_train))
+```
+There are 32,589 words in document-term matrix for the test data, however there are only 3325 words which are also common in the train data set. So, let us drop the remaining words for the classification problem. This is however not an optimal solution, as I am dropping many words.  
+
+```{r,echo = FALSE}
+# A suboptimal but practical solution: ignore words you haven't seen before
+# can do this by pre-specifying a dictionary in the construction of a DTM
+DTM_test2 = DocumentTermMatrix(my_documents_test,
+                               control = list(dictionary=Terms(DTM_train)))
+# Now checking whether I have all the words from train in test
+summary(Terms(DTM_test2) %in% Terms(DTM_train))
+```
+  
+**Create the TF-IDF matrix for test and train data:**  
+```{r,echo = FALSE}
+# Now lets create TF-IDF matrix for train and test
+tfidf_train = weightTfIdf(DTM_train)
+tfidf_test = weightTfIdf(DTM_test2)
+# Converting tfidf_train to matrix
+tfidf_train = as.matrix(tfidf_train)
+tfidf_train = tfidf_train[ , apply(tfidf_train, 2, var) != 0]
+```
+3325 words are still high to conduct classification. Thus I will reduce the dimensions using Principal Component Analysis. I will run the PCAs on the train data set and take the top words which explain 75% of the variability in data.  
+  
+  
+**Run PCA on TF-IDF to reduce the number of words:**  
+```{r PCA,echo = FALSE}
+# Run PCA on TF-IDF to reduce the number of words
+pc_train = prcomp(as.matrix(tfidf_train), scale=TRUE)
+# Let's use the top PCs which explain 75% of the variability. So I will take first 330 PCs
+X_train = pc_train$x[,1:330]
+X_train  = cbind(X_train,class_labels_train)
+# Now scale the test data
+tfidf_test = as.matrix(tfidf_test)
+#tfidf_test = tfidf_test[ , apply(tfidf_test, 2, var) != 0]
+#Scaling the test data and applying PCs from train
+scaled_tfidf_test = scale(tfidf_test, center=TRUE, scale=TRUE)
+X_test <- scaled_tfidf_test %*% pc_train$rotation[,1:330]
+#X_test_pc <- as.data.frame(X_test_pc)
+#X_test = predict(pc_train, scaled_tfidf_test)
+X_test = X_test[,1:330]
+```
+Based on the PCA on train data, I can say that 330 words define 75% of the variability. Using the PCAs on the train data set, I predicted the PCAs on test data set. I will use these data sets for our classification of the authors.    
+  
+    
+(b) Classification - 1: Random Forest.  
+---------------------------------------   
+After running Random Forest I have an acuracy of 59%.  
+```{r Random Forest,echo = FALSE}
+X_train = as.data.frame(X_train)
+for (name in names(X_train)){
+  if (name == "class_labels_train"){
+    next
+  }else{
+    X_train[[name]] <- as.numeric(as.character(X_train[[name]]))
+  }
+}
+X_test = as.data.frame(X_test)
+set.seed(99)
+author.rf = randomForest(class_labels_train ~., 
+                         data = X_train,
+                         ntrees = 500,
+                         importance = TRUE)
+predict_test = predict(author.rf,X_test,type="response")
+rf_confusion_matrix = table(predict_test,class_labels_test)
+accuracy = sum(diag(rf_confusion_matrix)) / sum(rf_confusion_matrix)
+accuracy
+```
+     
+  
+    
+However, let's look at how the accuracy varies for different authors:    
+```{r Accuracy variance,echo = FALSE}
+library(dplyr)
+accurate_authors = as.data.frame(cbind(unique(class_labels_train),
+                                       diag(rf_confusion_matrix)))
+colnames(accurate_authors) = c("Authors","Correct_Predictions")
+accurate_authors$Correct_Predictions =  as.numeric(as.character(accurate_authors$Correct_Predictions))
+accurate_authors$Authors = as.character(accurate_authors$Authors)
+accurate_authors_sorted = accurate_authors[order(-accurate_authors$Correct_Predictions),]
+accurate_authors_sorted$percentage_accuracy = accurate_authors_sorted$Correct_Predictions/50
+#head(accurate_authors_sorted,10)
+rownames(accurate_authors_sorted) <- NULL
+pander(head(accurate_authors_sorted,10))
+```
+  
+```{r, echo=FALSE}
+# Plotting the top accurately predicted authors
+top_n(accurate_authors_sorted, n=5, percentage_accuracy) %>%
+          ggplot(., aes(x=reorder(Authors,-percentage_accuracy), y=percentage_accuracy))+
+  geom_bar(stat = "identity",width = 0.4) +
+  scale_y_continuous(labels = scales::percent,expand = c(0,0),limits = c(0,1)) +
+  labs(title="% Documents Correctly Predicted for Top Predicted Authors", fontface='bold')+
+  theme_minimal()+
+  theme(axis.text.x = element_text(colour="grey20",size=9,angle=0,hjust=0.5,vjust=0.2),
+        axis.text.y = element_text(colour="grey20",size=11,angle=0),
+        axis.title.x = element_text(colour="grey20",size=11,hjust=0.5),
+        axis.title.y = element_text(colour="grey20",size=11,hjust=0.5))+
+  ylab("% Accuracy") +
+  xlab ("Authors") + 
+  geom_text(aes(label=paste0(sprintf("%.0f", percentage_accuracy*100),"%")), vjust = 1, size=4,fontface='bold',colour = 'white')
+
+#PLot the authors which are not predicted that well - 
+top_n(accurate_authors_sorted, n=-5, percentage_accuracy) %>%
+          ggplot(., aes(x=reorder(Authors,-percentage_accuracy), y=percentage_accuracy))+
+  geom_bar(stat = "identity",width = 0.4) +
+  scale_y_continuous(labels = scales::percent,expand = c(0,0),limits = c(0,1)) +
+  labs(title="% Documents Correctly Predicted for Bottom Predicted Authors", fontface='bold')+
+  theme_minimal()+
+  theme(axis.text.x = element_text(colour="grey20",size=9,angle=0,hjust=0.5,vjust=0.2),
+        axis.text.y = element_text(colour="grey20",size=11,angle=0),
+        axis.title.x = element_text(colour="grey20",size=11,hjust=0.5),
+        axis.title.y = element_text(colour="grey20",size=11,hjust=0.5))+
+  ylab("% Accuracy") +
+  xlab ("Authors") + 
+  geom_text(aes(label=paste0(sprintf("%.0f", percentage_accuracy*100),"%")), vjust = 1, size=4,fontface='bold',colour = 'white')
+```
+   
+**Authors most *correctly* predicted by Random forest:** JimGilchrist, LynnleyBrowning, KarlPenhaul, RobinSidel, MatthewBunce, NickLouth.  
+  
+**Authors most *incorrectly* predicted:** TanEeLyn, ScottHillis, EdnaFernandes, BenjaminKangLim, DarrenSchuettler.    
+  
+  
+(c) Classification - 2: Support Vector Machine (SVM)  
+-----------------------------------------------------  
+```{r SVM,echo = FALSE}
+set.seed(99)
+X_train_svm = subset(X_train, select = -class_labels_train) 
+y_train_svm = as.factor(class_labels_train)
+model_svm = svm(X_train_svm, y_train_svm, probability = TRUE)
+pred_prob = predict(model_svm, X_test, decision.values = TRUE, probability = TRUE)
+cm_svm = table(pred_prob,class_labels_test)
+accuracy_svm = sum(diag(cm_svm)) / sum(cm_svm)
+accuracy_svm
+```
+From SVM as well I get an accuracy of 57%.    
+  
+Interestingly, I get similar accuraies in the SVM model as well. Additionally, the run time for SVM is much lower than Random Forest algorithm.  
+```{r,echo = FALSE}
+library(dplyr)
+accurate_authors = as.data.frame(cbind(unique(class_labels_train),
+                                       diag(cm_svm)))
+colnames(accurate_authors) = c("Authors","Correct_Predictions")
+accurate_authors$Correct_Predictions =  as.numeric(as.character(accurate_authors$Correct_Predictions))
+accurate_authors$Authors = as.character(accurate_authors$Authors)
+accurate_authors_sorted = accurate_authors[order(-accurate_authors$Correct_Predictions),]
+accurate_authors_sorted$percentage_accuracy = accurate_authors_sorted$Correct_Predictions/50
+#head(accurate_authors_sorted,10)
+rownames(accurate_authors_sorted) <- NULL
+pander(head(accurate_authors_sorted,10))
+
+# Plotting the top accurately predicted authors
+top_n(accurate_authors_sorted, n=5, percentage_accuracy) %>%
+          ggplot(., aes(x=reorder(Authors,-percentage_accuracy), y=percentage_accuracy))+
+  geom_bar(stat = "identity",width = 0.4) +
+  scale_y_continuous(labels = scales::percent,expand = c(0,0),limits = c(0,1)) +
+  labs(title="% Documents Correctly Predicted for Top Predicted Authors", fontface='bold')+
+  theme_minimal()+
+  theme(axis.text.x = element_text(colour="grey20",size=8,angle=0,hjust=0.5,vjust=0.2),
+        axis.text.y = element_text(colour="grey20",size=11,angle=0),
+        axis.title.x = element_text(colour="grey20",size=10,hjust=0.5),
+        axis.title.y = element_text(colour="grey20",size=11,hjust=0.5))+
+  ylab("% Accuracy") +
+  xlab ("Authors") + 
+  geom_text(aes(label=paste0(sprintf("%.0f", percentage_accuracy*100),"%")), vjust = 1, size=4,fontface='bold',colour = 'white')
+
+#Plot the authors which are not predicted that well - 
+top_n(accurate_authors_sorted, n=-5, percentage_accuracy) %>%
+          ggplot(., aes(x=reorder(Authors,-percentage_accuracy), y=percentage_accuracy))+
+  geom_bar(stat = "identity",width = 0.4) +
+  scale_y_continuous(labels = scales::percent,expand = c(0,0),limits = c(0,1)) +
+  labs(title="% Documents Correctly Predicted for Bottom Predicted Authors", fontface='bold')+
+  theme_minimal()+
+  theme(axis.text.x = element_text(colour="grey20",size=8,angle=0,hjust=0.5,vjust=0.2),
+        axis.text.y = element_text(colour="grey20",size=11,angle=0),
+        axis.title.x = element_text(colour="grey20",size=10,hjust=0.5),
+        axis.title.y = element_text(colour="grey20",size=11,hjust=0.5))+
+  ylab("% Accuracy") +
+  xlab ("Authors") + 
+  geom_text(aes(label=paste0(sprintf("%.0f", percentage_accuracy*100),"%")), vjust = 1, size=4,fontface='bold',colour = 'white')
+```
+
+**Authors most *correctly* predicted by SVM:** LynnleyBrowning, JimGilchrist, GrahamEarnshaw, BradDorfman, MatthewBunce, NickLouth, TheresePoletti.    
+  
+**Authors most *incorrectly* predicted:** ScottHillis, DarrenSchuettler, DavidLawder, JanLopatka, BenjaminKangLim.    
+  
+    
+(d) Summary  
+-------------  
+Overall, the outputs of the 2 model does give a similar accuracy of ~58%. While this is not impressive, I do get a lot of authors which have very hgh accuracies in both the models. Overall accuracy seems to be low as there are some authors who are not predicted that well. One potential reason behind this could be that I have dropped quite a few words form the train and test data sets. However, there are many more words in the test data (which if incorporated could improve accuracies).    
+
+  
+
+
+
+  
+
+
+
+
+<P style="page-break-before: always">
+\newpage  
+6. Association Rule Mining  
+============================  
+
+(a) Data Pre-Proccessing    
+-------------------------  
+```{r groceries init, warning=FALSE, message=FALSE, include=FALSE}
+detach(package:tm, unload=TRUE)
+library(arules)  
+library(reshape)
+library(arulesViz)
+
+# Read in groceries from file
+groceries_raw <- read.table("https://raw.githubusercontent.com/jgscott/STA380/master/data/groceries.txt", header = FALSE, sep = ",", col.names = paste0("V",seq_len(32)), fill = TRUE)
+#summary(groceries_raw)
+#attach(grocery_raw)
+```
+
+```{r, echo=FALSE}
+# Create User
+groceries_raw$user <- seq.int(nrow(groceries_raw))
+#Melt column into one row
+groceries_reshaped=melt(groceries_raw, id=c("user"))
+#Remove column 'Variable'
+groceries_reshaped=groceries_reshaped[,-c(2)]
+#sort
+groceries_reshaped2<-groceries_reshaped[order(groceries_reshaped$user),]
+#Remove all blank values 
+groceries_reshaped3=groceries_reshaped2[groceries_reshaped2$value!="",]
+# make user a factor
+groceries_reshaped3$user <- factor(groceries_reshaped3$user)
+#summary(groceries_reshaped3)
+rownames(groceries_reshaped3) <- NULL
+pander(head(groceries_reshaped3))
+```
+The table above shows the head of transaction dataframe before splitting it by transactions.  
+  
+```{r top 10 items, echo=FALSE}
+# Barplot of top 10 grocery items
+# Cool use of magrittr pipes in plotting/summary workflow
+# the dot (.) means "plug in the argument coming from the left"
+groceries_reshaped3$value %>%
+  summary(., maxsum=Inf) %>%
+  sort(., decreasing=TRUE) %>%
+  head(., 10) %>%
+  barplot(., las=2, cex.names=0.6, 
+          xlab="Item", 
+          ylab="Count", 
+          main="Top 10 Grocery Items",
+          col=rainbow(10))
+```
+
+(b) Apriori Algorithm   
+---------------------  
+  
+The Apriori Algorithm expects a list of baskets in a special format. In this case, one "transaction" of items per user.  
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+# First split data into a list of items for each user
+groceries <- split(x=groceries_reshaped3$value, f=groceries_reshaped3$user)
+paste("There are ",length(groceries), "transactions.")
+```
+
+```{r, include=FALSE}
+## Remove duplicates ("de-dupe")
+groceries <- lapply(groceries, unique)
+## Cast this variable as a special arules "transactions" class.
+groceriestrans <- as(groceries, "transactions")
+#Create a list of possible values for support and confidence
+sup = seq(.009,0.05,by=.01)
+con = seq(.2,0.5,by=.05)
+parmb = expand.grid(sup,con)
+colnames(parmb) = c('sup','con')
+nset = nrow(parmb)
+avg_inspection = rep(0,nset)
+# Run a loop to get optimum value of support and confidence to maximize lift
+for(i in 1:nset) {
+  groceryrules <- apriori(groceriestrans, parameter=list(support=parmb[i,1], confidence=parmb[i,2], maxlen=5))
+  inspection=inspect(groceryrules)
+  avg_inspection[i]=mean(inspection$lift)
+}
+#inspection=mean(inspection)
+#print(cbind(parmb,avg_inspection))
+```
+I  ran a loop with values for support ranging from 0.009 to 0.05 and confidence from 0.2 to 0.5. For these different combinations, I looked for that one that gave us max average lift, which means that there is a high association betwwen the items in the basket. Our goal was to get a high lift value with maximum support. The results I got were best for support= 0.009 and confidence =0.5 with a max average lift of 2.2255.However, increasing the support will ensure higher transactions containing items of interest. The trade off here could be the decrease in lift, which what I see here. But, a slightly higher support ensures many more transactions/rules with a minimum effect on lift. Thus, I decided to choose support to be in between the two values, at 0.01 and confidence a little lower at 0.4.  
+
+
+```{r,message=FALSE, warning=FALSE, include=FALSE}
+groceryrules_final1<- apriori(groceriestrans, 
+	parameter=list(support=.01, confidence=.4, maxlen=5))
+inspect(subset(groceryrules_final1, subset=lift > 2))
+#inspect(groceryrules_final1)
+summary(groceryrules_final1)
+```
+I then again ran the model with chosen values of support and confidence and took a subset of only those rules whose lift was greater than 2 since the mean was very close to 2, it could have given us less associated rules as well. This gave us set of 29 rules with strong association. Out of the groups, whole milk seems to come up the most followed by other vegetables. A large % of people with various baskets are almost always interested in buying whole milk and/or other vegetables.  
+
+
+```{r, include=FALSE}
+subset_groc = (subset(groceryrules_final1, subset=lift > 2))
+```
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+plot(subset_groc,method="graph", control = list(type="items"))
+plot(groceryrules_final1, shading="order", control = list(main = "Two-key plot",
+  col=rainbow(max(size(groceryrules_final1))-1L)))
+plot(subset_groc, method="matrix", measure="support")
+subrules <- sample(subset_groc, 20)
+plot(subrules, method="graph", control=list(layout=igraph::in_circle()))
+```
+   
+The visualizations above gives us the strength f the associations. The first graph gives us a depiction of the importance of the various basket items. Whole milk and other vegetables that came us to be most common are in the middle with branches extending outwards to other items. The next one gives us a two-key plot, not for only the subset but the whole set of values as a function of support and confidence. The final graphis a matrix representation of the matrix of rules with the color scale showing the lift. I can match these to the lift values above and get the exact items in the basket.     
+
+(c) Choice of parameters  
+-------------------------  
+I chose support= 0.009 because higher levels of support gave too few rules for us to inspect. I chose confidence = 0.5 because I want to make sure that if iem on rhs appears, item on lhs will also appear. However, this only accounts for how popular the items on rhs are, but not those on the lhs. If rhs items appear regularly in general, there is a greater chance that items on the rhs will contain items on the lhs. To account for this bias, I select our final itemlists based on lift since lift measures how likely item on lhs is purchased when item rhs is purchased. For these chosen values of support and lift we get a max average lift of 2.2255. Therefore, I sort the items by lift and rank the top 20 rules, which is the result generated by the algorithm.   
+
+(d) Recommendation  
+-------------------  
+This information would be valuable to store managers planning inventory for these perishable items. Also, this information can be used for product placement strategy. Grouping items frequently bought together on the same shelf or aisle.
+
+
+
