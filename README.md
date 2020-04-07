@@ -1,4 +1,4 @@
-# Amber Camilleri's Repository for [STA 380](https://github.com/jgscott/STA380)
+# Amber Camilleri's Repository for [STA 380: Predictive Modeling](https://github.com/jgscott/STA380)
 
 Instructor: Dr. James Scott
 
